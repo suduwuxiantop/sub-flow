@@ -40,4 +40,48 @@ if (!yamlText.includes('proxy-groups:')) throw new Error('missing proxy-groups s
 if (!yamlText.includes('rule-providers:')) throw new Error('missing rule-providers section');
 if (!yamlText.includes('MATCH,')) throw new Error('missing final MATCH rule');
 if (!yamlText.includes('AI 工具')) throw new Error('missing AI category group');
+if (!yamlText.includes('⚡ 故障转移')) throw new Error('missing fallback group');
+if (!yamlText.includes('type: fallback')) throw new Error('fallback group has wrong type');
+
+console.log('\n=== already-Clash-YAML source test (airport ships its own groups) ===');
+const clashYamlSource = `
+port: 7890
+proxies:
+  - {name: "🇭🇰 HK-01", type: vmess, server: 1.2.3.4, port: 443, uuid: "11111111-2222-3333-4444-555555555555", alterId: 0, cipher: auto, tls: true, network: ws, ws-opts: {path: "/ray", headers: {Host: "hk.example.com"}}}
+  - name: "🇯🇵 JP-01"
+    type: trojan
+    server: 2.3.4.5
+    port: 443
+    password: "mypassword"
+    sni: jp.example.com
+    udp: true
+  - name: "🇸🇬 SG-01"
+    type: ss
+    server: 3.4.5.6
+    port: 8388
+    cipher: aes-256-gcm
+    password: "sspass"
+proxy-groups:
+  - name: 阿里系
+    type: select
+    proxies: ["DIRECT"]
+  - name: OZON欧众平台
+    type: select
+    proxies: ["DIRECT"]
+rules:
+  - MATCH,阿里系
+`;
+
+const parsedYamlSrc = parseSubscriptionBody(clashYamlSource);
+if (!parsedYamlSrc.proxies || parsedYamlSrc.proxies.length !== 3) {
+  throw new Error('expected to extract 3 proxies from already-Clash-YAML source, got ' + (parsedYamlSrc.proxies && parsedYamlSrc.proxies.length));
+}
+const yamlSrcConfig = generateClashConfig(parsedYamlSrc.proxies, ['ai', 'streaming'], []);
+const yamlSrcText = dump(yamlSrcConfig);
+if (yamlSrcText.includes('阿里系') || yamlSrcText.includes('OZON欧众平台')) {
+  throw new Error('original airport proxy-groups leaked through into generated config');
+}
+if (!yamlSrcText.includes('AI 工具')) throw new Error('missing AI category group for already-YAML source');
+if (!yamlSrcText.includes('⚡ 故障转移')) throw new Error('missing fallback group for already-YAML source');
+
 console.log('\nALL CHECKS PASSED');

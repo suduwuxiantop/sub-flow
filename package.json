@@ -1,0 +1,14 @@
+{
+  "name": "sub-flow",
+  "version": "1.0.0",
+  "description": "把任意机场订阅转换成按使用习惯自动分流的 Clash 订阅，零依赖 Node.js 实现",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/local-test.js"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=16"
+  }
+}

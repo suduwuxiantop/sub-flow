@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sub-Flow · 智能分流订阅转换</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #262b36;
+    --text: #e6e8ec;
+    --muted: #8b93a3;
+    --accent: #4f8cff;
+    --accent-2: #37d399;
+    --danger: #ff6b6b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 40px 20px 80px; }
+  header { text-align: center; margin-bottom: 32px; }
+  header h1 { font-size: 26px; margin: 0 0 8px; }
+  header p { color: var(--muted); margin: 0; font-size: 14px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+  label.field-label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+  input[type=text] {
+    width: 100%;
+    padding: 12px 14px;
+    background: #0c0e12;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 14px;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .cat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+  @media (max-width: 560px) { .cat-grid { grid-template-columns: 1fr; } }
+  .cat-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px;
+    background: #0c0e12;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .cat-item input { width: 16px; height: 16px; accent-color: var(--accent); }
+  button#genBtn {
+    width: 100%;
+    padding: 14px;
+    margin-top: 20px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  button#genBtn:disabled { opacity: 0.6; cursor: not-allowed; }
+  button#genBtn:hover:not(:disabled) { filter: brightness(1.08); }
+  #result { display: none; }
+  #result.show { display: block; }
+  .result-url {
+    display: flex; gap: 8px; align-items: center;
+    background: #0c0e12;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12.5px;
+    word-break: break-all;
+  }
+  .result-url span { flex: 1; }
+  .copy-btn {
+    background: var(--accent-2);
+    color: #06281c;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .msg { font-size: 13px; margin-top: 10px; }
+  .msg.error { color: var(--danger); }
+  .msg.info { color: var(--muted); }
+  footer { text-align: center; color: var(--muted); font-size: 12px; margin-top: 40px; }
+  footer a { color: var(--accent); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  .how { font-size: 13px; color: var(--muted); }
+  .how ol { padding-left: 20px; margin: 8px 0 0; }
+  .how li { margin-bottom: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Sub-Flow 智能分流订阅转换</h1>
+    <p>输入任意机场的订阅链接，按你的使用习惯自动生成分流规则，一份 Clash 订阅搞定 AI / 流媒体 / 社交 / 游戏</p>
+  </header>
+
+  <div class="card">
+    <label class="field-label">机场原始订阅链接</label>
+    <input type="text" id="subUrl" placeholder="https://your-airport.com/api/v1/client/subscribe?token=xxxx">
+
+    <label class="field-label" style="margin-top:20px;">按需勾选分流偏好（不勾选的类别默认合并走主节点）</label>
+    <div class="cat-grid" id="catGrid"></div>
+
+    <button id="genBtn">生成分流订阅</button>
+    <div class="msg" id="msg"></div>
+
+    <div id="result">
+      <label class="field-label" style="margin-top:20px;">你的专属分流订阅链接（复制到 Clash Verge / Clash Mi 等客户端）</label>
+      <div class="result-url">
+        <span id="resultLink"></span>
+        <button class="copy-btn" id="copyBtn">复制</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="card how">
+    <strong>怎么用</strong>
+    <ol>
+      <li>粘贴你现有机场的订阅链接（支持 vmess / trojan / vless / ss / hysteria2，以及已经是 Clash 格式的订阅）</li>
+      <li>勾选你关心的分类，比如常看 Netflix 就勾流媒体，常用 ChatGPT 就勾 AI 工具</li>
+      <li>点生成，把新链接粘到 Clash 客户端的订阅里，以后每次刷新都会自动带着你的分流规则</li>
+    </ol>
+    <p>没勾选的分类不会单独分组，会跟着主节点选择器走，不影响正常使用。规则集来自社区维护的开源规则库，每天自动更新一次。</p>
+  </div>
+
+  <footer>
+    由 <a href="https://main.suduwuxian.top" target="_blank" rel="noopener">速度无限VPN</a> 开源开发 ·
+    源码见 <a href="https://github.com/suduwuxiantop/sub-flow" target="_blank" rel="noopener">GitHub</a>
+  </footer>
+</div>
+
+<script>
+async function loadCategories() {
+  const res = await fetch('/api/categories');
+  const cats = await res.json();
+  const grid = document.getElementById('catGrid');
+  grid.innerHTML = cats.map(c => `
+    <label class="cat-item">
+      <input type="checkbox" value="${c.id}">
+      <span>${c.label}</span>
+    </label>
+  `).join('');
+}
+
+function showMsg(text, type) {
+  const el = document.getElementById('msg');
+  el.textContent = text;
+  el.className = 'msg ' + (type || 'info');
+}
+
+async function generate() {
+  const subUrl = document.getElementById('subUrl').value.trim();
+  if (!subUrl) { showMsg('请先填写订阅链接', 'error'); return; }
+  const checked = [...document.querySelectorAll('#catGrid input:checked')].map(el => el.value);
+
+  const btn = document.getElementById('genBtn');
+  btn.disabled = true;
+  btn.textContent = '生成中...';
+  showMsg('正在拉取并解析订阅，请稍候（首次生成需要几秒）', 'info');
+  document.getElementById('result').classList.remove('show');
+
+  try {
+    const res = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subUrl, categories: checked }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || '生成失败');
+    const fullUrl = location.origin + data.subPath;
+    document.getElementById('resultLink').textContent = fullUrl;
+    document.getElementById('result').classList.add('show');
+    showMsg('生成成功，复制下方链接添加到 Clash 客户端即可', 'info');
+  } catch (e) {
+    showMsg(e.message || '生成失败，请检查订阅链接是否正确', 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '生成分流订阅';
+  }
+}
+
+document.getElementById('genBtn').addEventListener('click', generate);
+document.getElementById('copyBtn').addEventListener('click', () => {
+  const text = document.getElementById('resultLink').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.getElementById('copyBtn');
+    const old = btn.textContent;
+    btn.textContent = '已复制';
+    setTimeout(() => { btn.textContent = old; }, 1500);
+  });
+});
+
+loadCategories();
+</script>
+</body>
+</html>

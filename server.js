@@ -8,7 +8,7 @@ const { fetchSubscription } = require('./lib/fetcher');
 const { parseSubscriptionBody } = require('./lib/parse');
 const { generateClashConfig } = require('./lib/generate');
 const { dump } = require('./lib/yaml');
-const { CATEGORIES } = require('./lib/rules');
+const { CATEGORIES, sanitizeCustomRules } = require('./lib/rules');
 const { createToken, getToken } = require('./lib/storage');
 const { allow } = require('./lib/ratelimit');
 
@@ -48,7 +48,7 @@ function readBody(req, maxBytes = 200000) {
   });
 }
 
-async function buildYamlFromSubUrl(subUrl, categories) {
+async function buildYamlFromSubUrl(subUrl, categories, customRules) {
   const body = await fetchSubscription(subUrl);
   const parsed = parseSubscriptionBody(body);
   if (parsed.alreadyYaml) {
@@ -59,7 +59,7 @@ async function buildYamlFromSubUrl(subUrl, categories) {
   if (!parsed.proxies || parsed.proxies.length === 0) {
     throw new Error('未能从该订阅中解析出任何节点，请确认链接是否为标准机场订阅');
   }
-  const config = generateClashConfig(parsed.proxies, categories);
+  const config = generateClashConfig(parsed.proxies, categories, customRules);
   return dump(config);
 }
 
@@ -96,7 +96,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(
         res,
         200,
-        CATEGORIES.map((c) => ({ id: c.id, label: c.label }))
+        CATEGORIES.map((c) => ({ id: c.id, label: c.label, group: c.group }))
       );
     }
 
@@ -115,15 +115,22 @@ const server = http.createServer(async (req, res) => {
       const categories = Array.isArray(payload.categories) ? payload.categories : [];
       if (!subUrl) return sendJson(res, 400, { error: '请提供订阅链接' });
 
+      let customRules;
+      try {
+        customRules = sanitizeCustomRules(payload.customRules);
+      } catch (e) {
+        return sendJson(res, 400, { error: e.message || '自定义规则格式错误' });
+      }
+
       // Validate once up-front so obviously-bad input fails fast with a clear message,
       // even though /sub/:token re-validates on every real fetch too.
       try {
-        await buildYamlFromSubUrl(subUrl, categories);
+        await buildYamlFromSubUrl(subUrl, categories, customRules);
       } catch (e) {
         return sendJson(res, 400, { error: e.message || '生成失败' });
       }
 
-      const token = createToken({ subUrl, categories });
+      const token = createToken({ subUrl, categories, customRules });
       return sendJson(res, 200, { token, subPath: `/sub/${token}` });
     }
 
@@ -139,7 +146,7 @@ const server = http.createServer(async (req, res) => {
         return res.end('订阅不存在或已失效');
       }
       try {
-        const yamlText = await buildYamlFromSubUrl(record.subUrl, record.categories);
+        const yamlText = await buildYamlFromSubUrl(record.subUrl, record.categories, record.customRules);
         res.writeHead(200, {
           'Content-Type': 'text/yaml; charset=utf-8',
           'Content-Disposition': 'attachment; filename="sub-flow.yaml"',

@@ -57,6 +57,55 @@
     font-size: 13px;
   }
   .cat-item input { width: 16px; height: 16px; accent-color: var(--accent); }
+  .cat-search { margin-top: 12px; margin-bottom: 4px; }
+  .cat-group-title {
+    grid-column: 1 / -1;
+    font-size: 12px;
+    color: var(--muted);
+    margin: 14px 0 -2px;
+    font-weight: 600;
+  }
+  .cat-group-title:first-child { margin-top: 4px; }
+  .cat-empty { grid-column: 1 / -1; color: var(--muted); font-size: 13px; padding: 8px 2px; }
+  .custom-rules { margin-top: 8px; }
+  .rule-row {
+    display: grid;
+    grid-template-columns: 1fr 1.4fr 1fr auto;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+  @media (max-width: 560px) { .rule-row { grid-template-columns: 1fr; } }
+  .rule-row select, .rule-row input[type=text] {
+    padding: 10px 10px;
+    background: #0c0e12;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 13px;
+    width: 100%;
+  }
+  .rule-row select:focus, .rule-row input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .rule-del-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--danger);
+    border-radius: 8px;
+    padding: 0 12px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .rule-add-btn {
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--accent);
+    border-radius: 8px;
+    padding: 10px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    width: 100%;
+  }
+  .rule-add-btn:hover { border-color: var(--accent); }
+  .rule-hint { font-size: 12px; color: var(--muted); margin-top: 8px; }
   button#genBtn {
     width: 100%;
     padding: 14px;
@@ -118,6 +167,7 @@
     <input type="text" id="subUrl" placeholder="https://your-airport.com/api/v1/client/subscribe?token=xxxx">
 
     <label class="field-label" style="margin-top:20px;">按需勾选分流偏好（不勾选的类别默认合并走主节点）</label>
+    <input type="text" id="catSearch" class="cat-search" placeholder="搜索分类，比如「游戏」「TikTok」…">
     <div class="cat-grid" id="catGrid"></div>
 
     <button id="genBtn">生成分流订阅</button>
@@ -132,11 +182,19 @@
     </div>
   </div>
 
+  <div class="card">
+    <label class="field-label">自定义分流规则（超出预设分类的个性化需求）</label>
+    <div class="custom-rules" id="customRules"></div>
+    <button type="button" class="rule-add-btn" id="addRuleBtn">＋ 添加自定义规则</button>
+    <p class="rule-hint">规则会优先于上方预设分类生效，最多 20 条。域名/关键字请勿包含 http:// 或路径，例如 example.com、.example.com、example。</p>
+  </div>
+
   <div class="card how">
     <strong>怎么用</strong>
     <ol>
       <li>粘贴你现有机场的订阅链接（支持 vmess / trojan / vless / ss / hysteria2，以及已经是 Clash 格式的订阅）</li>
-      <li>勾选你关心的分类，比如常看 Netflix 就勾流媒体，常用 ChatGPT 就勾 AI 工具</li>
+      <li>勾选你关心的分类，比如常看 Netflix 就勾流媒体，常用 ChatGPT 就勾 AI 工具；分类多了可以用上方搜索框快速查找</li>
+      <li>有特殊需求可以在「自定义分流规则」里自己添加域名 / IP 段，指定走代理、直连还是拦截，优先级高于预设分类</li>
       <li>点生成，把新链接粘到 Clash 客户端的订阅里，以后每次刷新都会自动带着你的分流规则</li>
     </ol>
     <p>没勾选的分类不会单独分组，会跟着主节点选择器走，不影响正常使用。规则集来自社区维护的开源规则库，每天自动更新一次。</p>
@@ -149,16 +207,105 @@
 </div>
 
 <script>
+let ALL_CATEGORIES = [];
+let CHECKED_IDS = new Set();
+
+const RULE_TYPES = [
+  { value: 'DOMAIN', label: '精确域名 (DOMAIN)' },
+  { value: 'DOMAIN-SUFFIX', label: '域名后缀 (DOMAIN-SUFFIX)' },
+  { value: 'DOMAIN-KEYWORD', label: '域名关键字 (DOMAIN-KEYWORD)' },
+  { value: 'IP-CIDR', label: 'IP 段 (IP-CIDR)' },
+];
+const RULE_POLICIES = [
+  { value: 'proxy', label: '走代理' },
+  { value: 'direct', label: '直连' },
+  { value: 'reject', label: '拦截' },
+];
+
+function escapeHtml(str) {
+  return String(str).replace(/[&<>"']/g, (m) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[m]));
+}
+
+function renderCategories(filterText) {
+  const grid = document.getElementById('catGrid');
+  const q = (filterText || '').trim().toLowerCase();
+  const matched = ALL_CATEGORIES.filter((c) => {
+    if (!q) return true;
+    return (c.label || '').toLowerCase().includes(q) ||
+      (c.id || '').toLowerCase().includes(q) ||
+      (c.group || '').toLowerCase().includes(q);
+  });
+
+  if (matched.length === 0) {
+    grid.innerHTML = '<div class="cat-empty">没有匹配的分类，换个关键词试试</div>';
+    return;
+  }
+
+  let html = '';
+  let lastGroup = null;
+  for (const c of matched) {
+    if (c.group && c.group !== lastGroup) {
+      html += `<div class="cat-group-title">${escapeHtml(c.group)}</div>`;
+      lastGroup = c.group;
+    }
+    const checked = CHECKED_IDS.has(c.id) ? 'checked' : '';
+    html += `
+      <label class="cat-item">
+        <input type="checkbox" value="${escapeHtml(c.id)}" ${checked}>
+        <span>${escapeHtml(c.label)}</span>
+      </label>
+    `;
+  }
+  grid.innerHTML = html;
+
+  grid.querySelectorAll('input[type=checkbox]').forEach((el) => {
+    el.addEventListener('change', () => {
+      if (el.checked) CHECKED_IDS.add(el.value);
+      else CHECKED_IDS.delete(el.value);
+    });
+  });
+}
+
 async function loadCategories() {
   const res = await fetch('/api/categories');
-  const cats = await res.json();
-  const grid = document.getElementById('catGrid');
-  grid.innerHTML = cats.map(c => `
-    <label class="cat-item">
-      <input type="checkbox" value="${c.id}">
-      <span>${c.label}</span>
-    </label>
-  `).join('');
+  ALL_CATEGORIES = await res.json();
+  renderCategories('');
+}
+
+function selectOptions(options) {
+  return options.map((o) => `<option value="${o.value}">${escapeHtml(o.label)}</option>`).join('');
+}
+
+function addRuleRow(prefill) {
+  const wrap = document.getElementById('customRules');
+  const row = document.createElement('div');
+  row.className = 'rule-row';
+  row.innerHTML = `
+    <select class="rule-type">${selectOptions(RULE_TYPES)}</select>
+    <input type="text" class="rule-value" placeholder="例如 example.com">
+    <select class="rule-policy">${selectOptions(RULE_POLICIES)}</select>
+    <button type="button" class="rule-del-btn">删除</button>
+  `;
+  if (prefill) {
+    row.querySelector('.rule-type').value = prefill.type || 'DOMAIN';
+    row.querySelector('.rule-value').value = prefill.value || '';
+    row.querySelector('.rule-policy').value = prefill.policy || 'proxy';
+  }
+  row.querySelector('.rule-del-btn').addEventListener('click', () => row.remove());
+  wrap.appendChild(row);
+}
+
+function collectCustomRules() {
+  const rows = [...document.querySelectorAll('#customRules .rule-row')];
+  return rows
+    .map((row) => ({
+      type: row.querySelector('.rule-type').value,
+      value: row.querySelector('.rule-value').value.trim(),
+      policy: row.querySelector('.rule-policy').value,
+    }))
+    .filter((r) => r.value);
 }
 
 function showMsg(text, type) {
@@ -170,7 +317,14 @@ function showMsg(text, type) {
 async function generate() {
   const subUrl = document.getElementById('subUrl').value.trim();
   if (!subUrl) { showMsg('请先填写订阅链接', 'error'); return; }
-  const checked = [...document.querySelectorAll('#catGrid input:checked')].map(el => el.value);
+  const checked = [...CHECKED_IDS];
+  let customRules;
+  try {
+    customRules = collectCustomRules();
+  } catch (e) {
+    showMsg('自定义规则格式有误', 'error');
+    return;
+  }
 
   const btn = document.getElementById('genBtn');
   btn.disabled = true;
@@ -182,7 +336,7 @@ async function generate() {
     const res = await fetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ subUrl, categories: checked }),
+      body: JSON.stringify({ subUrl, categories: checked, customRules }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || '生成失败');
@@ -199,6 +353,8 @@ async function generate() {
 }
 
 document.getElementById('genBtn').addEventListener('click', generate);
+document.getElementById('catSearch').addEventListener('input', (e) => renderCategories(e.target.value));
+document.getElementById('addRuleBtn').addEventListener('click', () => addRuleRow());
 document.getElementById('copyBtn').addEventListener('click', () => {
   const text = document.getElementById('resultLink').textContent;
   navigator.clipboard.writeText(text).then(() => {
